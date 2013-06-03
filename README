@@ -1,0 +1,9 @@
+SQL Server 2012 Service Broker (with External Activator) sample.
+Includes:
+ - DB script + util scripts;
+ - .NET Framework 4.5 apps:
+   - Incoming message generator (Producer);
+   - Incoming message handler & outgoing message generator (Mapper);
+   - External self-hosted web service (ExternalService);
+   - Outgoing message consumer & statistic calculator (Consumer);
+ - External Activator sample config;

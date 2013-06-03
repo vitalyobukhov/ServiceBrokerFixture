@@ -1,0 +1,211 @@
+﻿using System;
+using System.Configuration;
+using System.Data;
+using System.Data.SqlClient;
+using System.Threading;
+using Mapper.ExternalServiceReference;
+
+namespace Mapper
+{
+    // Main solution logic.
+    // Mapper from incoming message with external service invocation to outgoing message
+    class Program
+    {
+        private const int batchSizeDefault = 100;
+        private const int maxBatchSize = 1000000;
+
+
+        private static readonly Random random = new Random();
+
+        // Min value of random delay for map execution.
+        // Null - no delay.
+        private static int? mapMinDelay;
+
+        // Max value of random delay for map execution.
+        // Null - no delay.
+        private static int? mapMaxDelay;
+
+        // Batch size for incoming message queue
+        private static int batchSize = batchSizeDefault;
+
+
+        // Gets external service url.
+        private static string ServiceUri
+        {
+            get { return ConfigurationManager.AppSettings["ServiceUri"]; }
+        }
+
+        // Gets connection string to sample service broker db.
+        private static string ConnectionString
+        {
+            get { return ConfigurationManager.ConnectionStrings["ServiceBroker"].ConnectionString; }
+        }
+
+        // Parses program startup arguments.
+        private static void ParseArgs(string[] args)
+        {
+            if (args.Length >= 2)
+            {
+                int minTmp, maxTmp;
+                if (int.TryParse(args[0], out minTmp) && int.TryParse(args[1], out maxTmp) &&
+                    minTmp >= 0 && maxTmp >= 0 && minTmp <= maxTmp)
+                {
+                    mapMinDelay = minTmp;
+                    mapMaxDelay = maxTmp;
+                }
+            }
+
+            if (args.Length >= 3)
+            {
+                int tmp;
+                if (int.TryParse(args[2], out tmp) && tmp > 0 && tmp <= maxBatchSize)
+                {
+                    batchSize = tmp;
+                }
+            }
+        }
+
+        // Simulates map execution delay.
+// ReSharper disable UnusedParameter.Local
+        private static void InnerMap(MapperInMessage message)
+// ReSharper restore UnusedParameter.Local
+        {
+            if (mapMinDelay.HasValue && mapMaxDelay.HasValue &&
+                !(mapMinDelay.Value == 0 && mapMaxDelay.Value == 0))
+                Thread.Sleep(random.Next(mapMinDelay.Value, mapMaxDelay.Value + 1));
+        }
+
+        // Main execution logic.
+        private static void Map()
+        {
+            // set actual timestamp
+            var mapperActivated = DateTime.Now.Ticks;
+
+            // try to open connection to external service
+            using (var serviceClient = new ExternalServiceClient("ExternalService", ServiceUri))
+            {
+                serviceClient.Open();
+
+                // try to open connection to service broker sample db
+                using (var connection = new SqlConnection(ConnectionString))
+                {
+                    connection.Open();
+
+                    //set actual timestamp
+                    var mapperConnected = DateTime.Now.Ticks;
+
+                    // prepare call of sp to dequeue message to outgoing message queue
+                    var dequeueCommand = new SqlCommand("DequeueIn", connection) { CommandType = CommandType.StoredProcedure };
+                    dequeueCommand.Parameters.AddWithValue("@batchSize", batchSize);
+                    var dequeueCommandBatchId = new SqlParameter("@batchId", SqlDbType.UniqueIdentifier) { Direction = ParameterDirection.Output };
+                    dequeueCommand.Parameters.Add(dequeueCommandBatchId);
+
+                    // prepare call of tvl to get messages from incoming message table
+                    var getCommand = new SqlCommand("SELECT * FROM GetIn(@batchId)", connection);
+                    var getCommandBatchId = new SqlParameter("@batchId", SqlDbType.UniqueIdentifier);
+                    getCommand.Parameters.Add(getCommandBatchId);
+
+                    // prepare call of sp to enqueue message from incoming message queue
+                    var enqueueCommand = new SqlCommand("EnqueueOut", connection) { CommandType = CommandType.StoredProcedure };
+                    var enqueueCommandMessageBody = new SqlParameter("@messageBody", SqlDbType.Xml);
+                    enqueueCommand.Parameters.Add(enqueueCommandMessageBody);
+
+                    // prepare call of so to delete message from incoming message table
+                    var truncateCommand = new SqlCommand("TruncateIn", connection) { CommandType = CommandType.StoredProcedure };
+                    var truncateCommandBatchId = new SqlParameter("@batchId", SqlDbType.UniqueIdentifier);
+                    truncateCommand.Parameters.Add(truncateCommandBatchId);
+
+                    // main messages handling loop
+                    while (true)
+                    {
+                        //set actual timestamp
+                        var mapperPreDequeued = DateTime.Now.Ticks;
+
+                        // no messages
+                        if ((int)dequeueCommand.ExecuteScalar() == 0)
+                            break;
+
+                        // get batch id as output parameter
+                        var batchId = (Guid)dequeueCommandBatchId.Value;
+                        getCommandBatchId.Value = batchId;
+                        truncateCommandBatchId.Value = batchId;
+
+                        // get messages from incoming table
+                        using (var inTable = new DataTable())
+                        {
+                            using (var adapter = new SqlDataAdapter(getCommand))
+                            {
+                                adapter.Fill(inTable);
+                            }
+                                
+                            //set actual timestamp
+                            var mapperPostDequeued = DateTime.Now.Ticks;
+
+                            // handle incoming messages batch
+                            foreach (DataRow row in inTable.Rows)
+                            {
+                                // get incoming message body
+                                var mapperInMessageBody = (string)row["MessageBody"];
+
+                                // set actual timestamp
+                                var mapperReceived = DateTime.Now.Ticks;
+
+                                // deserialize incoming message
+                                var inMessage = MapperInMessage.FromString(mapperInMessageBody, m =>
+                                {
+                                    m.MapperActivated = mapperActivated;
+                                    m.MapperConnected = mapperConnected;
+                                    m.MapperPreDequeued = mapperPreDequeued;
+                                    m.MapperPostDequeued = mapperPostDequeued;
+                                    m.MapperReceived = mapperReceived;
+                                });
+
+                                // simulate map execution
+                                InnerMap(inMessage);
+
+                                // set actual timestamp
+                                inMessage.MapperSent = DateTime.Now.Ticks;
+
+                                // convert incoming message to external service request
+                                var externalServiceRequest = new ProcessRequest(inMessage);
+
+                                // invoke external request
+                                var externalServiceResponse = serviceClient.Process(externalServiceRequest);
+
+                                // set actual timestamp
+                                var externalServiceResponded = DateTime.Now.Ticks;
+
+                                // convert external service response to outgoing message
+                                var outMessage = new MapperOutMessage(externalServiceResponse) { ServiceResponded = externalServiceResponded };
+
+                                // serialzie outgoing message
+                                var mapperOutMessageBody = outMessage.ToString();
+
+                                // enqueue message to outgoing message queue
+                                enqueueCommandMessageBody.Value = mapperOutMessageBody;
+                                enqueueCommand.ExecuteNonQuery();
+                            }
+                        }
+
+                        // delete messages from incoming message table
+                        truncateCommand.ExecuteNonQuery();
+                    }
+
+                    connection.Close();
+                }
+
+                serviceClient.Close();
+            }
+        }
+
+        // Startup logic.
+        private static void Main(string[] args)
+        {
+            // parse startup arguments
+            ParseArgs(args);
+
+            // execute main logic
+            Map();
+        }
+    }
+}
