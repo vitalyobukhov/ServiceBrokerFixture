@@ -31,6 +31,7 @@ namespace Common
 
             // omit namespaces
             writerNamespaces = new XmlSerializerNamespaces(new[] { XmlQualifiedName.Empty });
+
             serializers = new ConditionalWeakTable<Type, XmlSerializer>();
         }
 
@@ -38,9 +39,9 @@ namespace Common
         // Creates XmlSerializer with given root element name settings.
         private static XmlSerializer CreateSerializer(Type type, string rootName = null)
         {
-            return string.IsNullOrWhiteSpace(rootName) ? 
-                new XmlSerializer(type) : 
-                new XmlSerializer(type, new XmlRootAttribute(rootName));
+            return !string.IsNullOrWhiteSpace(rootName) ?
+                new XmlSerializer(type, new XmlRootAttribute(rootName)) :
+                new XmlSerializer(type);
         }
 
         // Serializes source object with given root element name into xml string representation.
@@ -55,6 +56,7 @@ namespace Common
                 {
                     serializer.Serialize(xmlWriter, source, writerNamespaces);
                 }
+
                 return stringWriter.ToString();
             }
         }

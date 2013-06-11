@@ -38,7 +38,9 @@ namespace Mapper
         public static MapperInMessage FromString(string messageBody, Action<MapperInMessage> finalizer = null)
         {
             var result = MessageSerializer.Deserialize<MapperInMessage>(messageBody, "InMessage");
+
             if (finalizer != null) finalizer(result);
+
             return result;
         }
     }

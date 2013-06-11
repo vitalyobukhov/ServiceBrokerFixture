@@ -37,8 +37,7 @@
         public long Consumed { get; set; }
 
 
-        public Measure(ConsumerMessage message) : 
-            this()
+        public Measure(ConsumerMessage message) : this()
         {
             Produced = message.Produced;
             MapperActivated = message.MapperActivated;

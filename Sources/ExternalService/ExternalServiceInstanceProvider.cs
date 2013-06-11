@@ -7,18 +7,16 @@ namespace ExternalService
 {
     // Custom implementation of instance provider for external service
     // to pass delay arguments on instance construction.
-    public class ExternalServiceInstanceProvider :
+    class ExternalServiceInstanceProvider :
         IInstanceProvider,
         IContractBehavior
     {
-        private readonly int? minProcessDelay;
-        private readonly int? maxProcessDelay;
+        private readonly Args args;
 
 
-        public ExternalServiceInstanceProvider(int? minProcessDelay, int? maxProcessDelay)
+        public ExternalServiceInstanceProvider(Args args)
         {
-            this.minProcessDelay = minProcessDelay;
-            this.maxProcessDelay = maxProcessDelay;
+            this.args = args;
         }
 
 
@@ -29,7 +27,7 @@ namespace ExternalService
 
         public object GetInstance(InstanceContext instanceContext)
         {
-            return new ExternalService(minProcessDelay, maxProcessDelay);
+            return new ExternalService(args);
         }
 
         public void ApplyDispatchBehavior(ContractDescription contractDescription, ServiceEndpoint endpoint, DispatchRuntime dispatchRuntime)

@@ -5,7 +5,7 @@ namespace ExternalService
 {
     // Request which is received by external service from mapper.
     [DataContract]
-    public class ProcessRequest
+    class ProcessRequest
     {
         // Id should be used by producer & consumer.
         [DataMember]

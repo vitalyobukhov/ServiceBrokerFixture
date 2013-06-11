@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Configuration;
+using CommandLine;
 using Common;
 using System.ServiceModel.Description;
 using System.ServiceModel;
@@ -9,15 +10,8 @@ namespace ExternalService
     // External service hosting environment.
     class Program
     {
+        private static readonly Args args = new Args();
         private static ExternalServiceHost serviceHost;
-
-        // Min value of random delay for external request execution.
-        // Null - no delay.
-        private static int? processMinDelay;
-
-        // Max value of random delay for external request execution.
-        // Null - no delay.
-        private static int? processMaxDelay;
 
 
         // Gets external service url.
@@ -27,30 +21,16 @@ namespace ExternalService
         }
 
 
-        // Parses program startup arguments.
-        private static void ParseArgs(string[] args)
-        {
-            if (args.Length >= 2)
-            {
-                int minTmp, maxTmp;
-
-                // execution delays
-                if (int.TryParse(args[0], out minTmp) && int.TryParse(args[1], out maxTmp) && 
-                    minTmp >= 0 && maxTmp >= 0 && minTmp <= maxTmp)
-                {
-                    processMinDelay = minTmp;
-                    processMaxDelay = maxTmp;
-                }
-            }
-        }
-
         // Service host startup logic.
         private static void Listen()
         {
+            const int maxReceivedMessageSize = ushort.MaxValue;
+            const int maxStringContentLength = ushort.MaxValue;
+
             var binding = new WSHttpBinding
             {
-                MaxReceivedMessageSize = ushort.MaxValue,
-                ReaderQuotas = { MaxStringContentLength = ushort.MaxValue}
+                MaxReceivedMessageSize = maxReceivedMessageSize,
+                ReaderQuotas = { MaxStringContentLength = maxStringContentLength }
             };
 
             var behavior = new ServiceMetadataBehavior
@@ -59,7 +39,7 @@ namespace ExternalService
                 MetadataExporter = { PolicyVersion = PolicyVersion.Policy15 }
             };
 
-            serviceHost = new ExternalServiceHost(processMinDelay, processMaxDelay, typeof(ExternalService), new Uri(ServiceUri));
+            serviceHost = new ExternalServiceHost(args, typeof(ExternalService), new Uri(ServiceUri));
             serviceHost.AddServiceEndpoint(typeof(IExternalService), binding, string.Empty);
             serviceHost.Description.Behaviors.Add(behavior);
             serviceHost.Open();
@@ -80,13 +60,18 @@ namespace ExternalService
         }
 
         // Startup logic.
-        private static void Main(string[] args)
+        private static void Main(string[] arguments)
         {
             Console.Title = "External Service";
-            Console.WriteLine("External Service started.");
 
             // parse startup arguments
-            ParseArgs(args);
+            if (!Parser.Default.ParseArguments(arguments, args))
+            {
+                Console.WriteLine(new CommandLine.Text.HelpText());
+                return;
+            }
+
+            Console.WriteLine("External Service started.");
 
             // try to start external service host
             try

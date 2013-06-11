@@ -5,7 +5,7 @@ namespace ExternalService
 {
     // Response which is sent by external service to mapper.
     [DataContract]
-    public class ProcessResponse
+    class ProcessResponse
     {
         // Id should be used by producer & consumer.
         [DataMember]

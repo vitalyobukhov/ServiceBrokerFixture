@@ -6,9 +6,6 @@ namespace Producer
     // Message which is enqueued to incoming message queue by producer.
     public class ProducerMessage
     {
-        public const string SerializationRootName = "InMessage";
-
-
         private static readonly Lazy<Random> random = new Lazy<Random>(); 
 
 

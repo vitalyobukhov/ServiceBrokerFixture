@@ -1,4 +1,5 @@
-﻿using Common;
+﻿using CommandLine;
+using Common;
 using System;
 using System.Configuration;
 using System.Data;
@@ -10,21 +11,15 @@ namespace Consumer
     // Outgoing queue message consumer.
     class Program
     {
-        // Default params values (ms).
-        private const int maxBatchSize = 1000000;
-        private const int listenCommandTimeoutValue = 10000;
-        private const int listenCommandTimeout = listenCommandTimeoutValue + 10000;
+        // Listen command message body parameter name.
         private const string listenCommandMessageBodyName = "@messageBody";
 
 
         private static SqlConnection connection;
-
-        // Messages batch size between batch delay.
-        // Null - no statistics.
-        private static int? batchSize;
+        private static readonly Args args = new Args();
 
         // Currect sequence number of consumed message.
-        private static int measureSequence;
+        private static int measureIndex;
 
         // Consumed messages measures holder.
         private static Measure[] measures;
@@ -40,29 +35,8 @@ namespace Consumer
         // Creates and opens connection to sample service broker db.
         private static void OpenConnection()
         {
-            if (connection == null)
-                connection = new SqlConnection(ConnectionString);
-
-            if (connection.State != ConnectionState.Open)
-                connection.Open();
-        }
-
-        // Parses program startup arguments.
-        private static void ParseArgs(string[] args)
-        {
-            if (args.Length >= 1)
-            {
-                int temp;
-
-                // batch size
-                if (int.TryParse(args[0], out temp) &&
-                    temp >= 1 && temp <= maxBatchSize)
-                {
-                    batchSize = temp;
-                    measureSequence = 0;
-                    measures = new Measure[temp];
-                }
-            }
+            connection = new SqlConnection(ConnectionString);
+            connection.Open();
         }
 
         // Prints statistic for consumed messages batch
@@ -126,14 +100,14 @@ namespace Consumer
                     Console.WriteLine("Dequeued message: {0}", message.Id);
 
                     // count statistic
-                    if (batchSize.HasValue)
+                    if (args.HasMeasures)
                     {
-                        measures[measureSequence++] = new Measure(message);
+                        measures[measureIndex++] = new Measure(message);
 
                         // batch consumed
-                        if (measureSequence >= batchSize.Value)
+                        if (measureIndex >= args.BatchSize)
                         {
-                            measureSequence = 0;
+                            measureIndex = 0;
                             Console.WriteLine();
                             PrintMeasures();
                             Console.WriteLine();
@@ -153,6 +127,10 @@ namespace Consumer
         // Listen for outgoing message queue.
         private static void Consume()
         {
+            // pooling timeouts
+            const int listenCommandTimeoutValue = 10000;
+            const int listenCommandTimeout = listenCommandTimeoutValue + 10000;
+
             // prepare call of sp to dequeue message from outgoing message queue
             var command = new SqlCommand("ListenOut", connection)
             {
@@ -185,9 +163,24 @@ namespace Consumer
         }
 
         // Startup logic.
-        private static void Main(string[] args)
+        private static void Main(string[] arguments)
         {
             Console.Title = "Consumer";
+
+            // parse startup arguments
+            if (!Parser.Default.ParseArguments(arguments, args))
+            {
+                Console.WriteLine(new CommandLine.Text.HelpText());
+                return;
+            }
+
+            // prepare measure vars
+            if (args.HasMeasures)
+            {
+                measureIndex = 0;
+                measures = new Measure[args.BatchSize];
+            }
+
             Console.WriteLine("Consumer started.");
 
             // try to open permanent db connection for application lifecycle
@@ -204,9 +197,6 @@ namespace Consumer
 
             // set disposal handler on application termination
             ConsoleInterop.SetHandler(Dispose);
-
-            // parse startup arguments
-            ParseArgs(args);
 
             // start consumer listener
             Consume();

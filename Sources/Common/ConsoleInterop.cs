@@ -19,7 +19,7 @@ namespace Common
         private delegate bool EventHandler(CtrlType sig);
 
         // The type of control signal received by the SetConsoleCtrlHandler handler.
-        enum CtrlType
+        private enum CtrlType
         {
 // ReSharper disable InconsistentNaming
             // CTRL+C.
@@ -44,10 +44,12 @@ namespace Common
         }
 
 
+        // SetConsoleCtrlHandler related.
         private static readonly object setLock;
         private static bool isSet;
         private static readonly EventHandler handler;
 
+        // User-defined handlers.
         private static Action ctrlCHandler;
         private static Action ctrlBreakHandler;
         private static Action closeHandler;
@@ -68,10 +70,12 @@ namespace Common
             shutdownHandler = null;
         }
 
+
         // SetConsoleCtrlHandler signal type switch and handler selector.
         private static bool Handler(CtrlType sig)
         {
             var result = false;
+
             switch (sig)
             {
                 case CtrlType.CTRL_C_EVENT:
@@ -81,6 +85,7 @@ namespace Common
                         result = true;
                     }
                     break;
+
                 case CtrlType.CTRL_BREAK_EVENT: 
                     if (ctrlBreakHandler != null)
                     {
@@ -88,6 +93,7 @@ namespace Common
                         result = true;
                     }
                     break;
+
                 case CtrlType.CTRL_CLOSE_EVENT: 
                     if (closeHandler != null)
                     {
@@ -95,6 +101,7 @@ namespace Common
                         result = true;
                     }
                     break;
+
                 case CtrlType.CTRL_LOGOFF_EVENT:
                     if (logoffHandler != null)
                     {
@@ -102,6 +109,7 @@ namespace Common
                         result = true;
                     }
                     break;
+
                 case CtrlType.CTRL_SHUTDOWN_EVENT: 
                     if (shutdownHandler != null)
                     {
@@ -110,6 +118,7 @@ namespace Common
                     }
                     break;
             }
+
             return result;
         }
 
@@ -119,27 +128,38 @@ namespace Common
         public static bool SetHandlers(Action ctrlC = null, Action ctrlBreak = null,
             Action close = null, Action logoff = null, Action shutdown = null)
         {
-            if (ctrlC == null && ctrlBreak == null &&
+            if (ctrlC == null && ctrlBreak == null && 
                 close == null && logoff == null && shutdown == null)
             {
                 return ClearHandlers();
             }
 
             var result = false;
+
             lock (setLock)
             {
+                if (ctrlC != null) 
+                    ctrlCHandler = ctrlC;
+
+                if (ctrlBreak != null) 
+                    ctrlBreakHandler = ctrlBreak;
+
+                if (close != null) 
+                    closeHandler = close;
+
+                if (logoff != null) 
+                    logoffHandler = logoff;
+
+                if (shutdown != null) 
+                    shutdownHandler = shutdown;
+
                 if (!isSet)
                 {
                     result = SetConsoleCtrlHandler(handler, true);
                     isSet = true;
                 }
-
-                if (ctrlC != null) ctrlCHandler = ctrlC;
-                if (ctrlBreak != null) ctrlBreakHandler = ctrlBreak;
-                if (close != null) closeHandler = close;
-                if (logoff != null) logoffHandler = logoff;
-                if (shutdown != null) shutdownHandler = shutdown;
             }
+
             return result;
         }
 
@@ -153,6 +173,7 @@ namespace Common
         public static bool ClearHandlers()
         {
             var result = false;
+
             lock (setLock)
             {
                 if (isSet)
@@ -161,6 +182,7 @@ namespace Common
                     isSet = false;
                 }
             }
+
             return result;
         }
     }

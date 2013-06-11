@@ -5,42 +5,18 @@ using System.Data.SqlClient;
 using System.Configuration;
 using System.Data;
 using System.Threading;
+using CommandLine;
 
 namespace Producer
 {
     // Incoming queue message producer.
     class Program
     {
-        // Default params values (ms and bytes).
-        private const int defaultBatchSize = 1;
-        private const int defaultPayloadSize = 4096;
-        private const int maxBatchSize = 1000000;
-        private const int maxMessageDelay = 60000;
-        private const int maxPayloadSize = 65536;
-
-
         // Program state.
-        private static bool isClosing = false;
+        private static bool isClosing;
         private static readonly Random random = new Random();
         private static SqlConnection connection;
-
-        // Min value of random delay between messages batch enqueue (ms).
-        // Null - no delay.
-        private static int? batchMinDelay;
-
-        // Max value of random delay between messages batch enqueue (ms).
-        // Null - no delay.
-        private static int? batchMaxDelay;
-
-        // Messages batch size between batch delay.
-        private static int batchSize = defaultBatchSize;
-
-        // Constant delay between messages in messages batch (ms).
-        // Null - no delay.
-        private static int? messageDelay;
-
-        // Message payload (useful information) size (bytes).
-        private static int payloadSize = defaultPayloadSize;
+        private static readonly Args args = new Args();
 
 
         // Gets connection string to sample service broker db.
@@ -53,60 +29,22 @@ namespace Producer
         // Creates and opens connection to sample service broker db.
         private static void OpenConnection()
         {
-            if (connection == null)
-                connection = new SqlConnection(ConnectionString);
-
-            if (connection.State != ConnectionState.Open)
-                connection.Open();
-        }
-
-        // Parses program startup arguments.
-        private static void ParseArgs(string[] args)
-        {
-            int tmp, minTmp, maxTmp;
-
-            // batch delays
-            if (args.Length >= 2 && int.TryParse(args[0], out minTmp) && int.TryParse(args[1], out maxTmp) &&
-                minTmp >= 0 && maxTmp >= 0 && minTmp <= maxTmp)
-            {
-                batchMinDelay = minTmp;
-                batchMaxDelay = maxTmp;
-            }
-
-            // batch size
-            if (args.Length >= 3 && int.TryParse(args[2], out tmp) && 
-                tmp >= 1 && tmp <= maxBatchSize)
-            {
-                batchSize = tmp;
-            }
-
-            // message delay
-            if (args.Length >= 4 && int.TryParse(args[3], out tmp) &&
-                tmp > 0 && tmp <= maxMessageDelay)
-            {
-                messageDelay = tmp;
-            }
-
-            // payload size
-            if (args.Length >= 5 && int.TryParse(args[4], out tmp) && 
-                tmp >= 0 && tmp <= maxPayloadSize)
-            {
-                payloadSize = tmp;
-            }
+            connection = new SqlConnection(ConnectionString);
+            connection.Open();
         }
 
         // Simulates delay between message production.
         private static void InnerProduceMessage()
         {
-            if (messageDelay.HasValue)
-                Thread.Sleep(messageDelay.Value);
+            if (args.HasMessageDelay)
+                Thread.Sleep(args.MessageDelay);
         }
 
         // Simulates delay between messages batch production.
         private static void InnerProduceBatch()
         {
-            if (batchMinDelay.HasValue && batchMaxDelay.HasValue)
-                Thread.Sleep(random.Next(batchMinDelay.Value, batchMaxDelay.Value + 1));
+            if (args.HasBatchDelay)
+                Thread.Sleep(random.Next(args.BatchMinDelay, args.BatchMaxDelay + 1));
         }
 
         // Main production logic.
@@ -121,17 +59,17 @@ namespace Producer
             while (!isClosing)
             {
                 // batch loop
-                for (var i = 0; i < batchSize && !isClosing; i++)
+                for (var i = 0; i < args.BatchSize && !isClosing; i++)
                 {
                     // create and serialize message for incoming message queue
-                    var message = ProducerMessage.Generate(payloadSize);
+                    var message = ProducerMessage.Generate(args.PayloadSize);
                     var messageBody = message.ToString();
 
                     // enqueue message in incoming message queue
                     parameter.Value = messageBody;
                     command.ExecuteNonQuery();
 
-                    Console.WriteLine("Enqueued message: {0}", message.Id);
+                    if (args.Verbose) Console.WriteLine("Enqueued message: {0}", message.Id);
 
                     // simulate delay between messages
                     InnerProduceMessage();
@@ -157,10 +95,18 @@ namespace Producer
         }
 
         // Startup logic.
-        private static void Main(string[] args)
+        private static void Main(string[] arguments)
         {
             Console.Title = "Producer";
-            Console.WriteLine("Producer started.");
+
+            // parse startup arguments
+            if (!Parser.Default.ParseArguments(arguments, args))
+            {
+                Console.WriteLine(new CommandLine.Text.HelpText());
+                return;
+            }
+
+            Console.Write("Producer started.");
 
             // try to open permanent db connection for application lifecycle
             try
@@ -175,10 +121,8 @@ namespace Producer
             }
 
             // set disposal handler on application termination
+            isClosing = false;
             ConsoleInterop.SetHandler(Dispose);
-
-            // parse startup arguments
-            ParseArgs(args);
 
             // start main logic in separate thread
             Task.Factory.StartNew(Produce);

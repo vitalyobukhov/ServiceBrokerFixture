@@ -3,6 +3,7 @@ using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Threading;
+using CommandLine;
 using Mapper.ExternalServiceReference;
 
 namespace Mapper
@@ -11,22 +12,8 @@ namespace Mapper
     // Mapper from incoming message with external service invocation to outgoing message
     class Program
     {
-        private const int batchSizeDefault = 100;
-        private const int maxBatchSize = 1000000;
-
-
         private static readonly Random random = new Random();
-
-        // Min value of random delay for map execution.
-        // Null - no delay.
-        private static int? mapMinDelay;
-
-        // Max value of random delay for map execution.
-        // Null - no delay.
-        private static int? mapMaxDelay;
-
-        // Batch size for incoming message queue
-        private static int batchSize = batchSizeDefault;
+        private static readonly Args args = new Args();
 
 
         // Gets external service url.
@@ -41,38 +28,41 @@ namespace Mapper
             get { return ConfigurationManager.ConnectionStrings["ServiceBroker"].ConnectionString; }
         }
 
-        // Parses program startup arguments.
-        private static void ParseArgs(string[] args)
+        // Simulates map execution delay.
+        private static void InnerMap()
         {
-            if (args.Length >= 2)
-            {
-                int minTmp, maxTmp;
-                if (int.TryParse(args[0], out minTmp) && int.TryParse(args[1], out maxTmp) &&
-                    minTmp >= 0 && maxTmp >= 0 && minTmp <= maxTmp)
-                {
-                    mapMinDelay = minTmp;
-                    mapMaxDelay = maxTmp;
-                }
-            }
-
-            if (args.Length >= 3)
-            {
-                int tmp;
-                if (int.TryParse(args[2], out tmp) && tmp > 0 && tmp <= maxBatchSize)
-                {
-                    batchSize = tmp;
-                }
-            }
+            if (args.HasMapDelay)
+                Thread.Sleep(random.Next(args.MapMinDelay, args.MapMaxDelay + 1));
         }
 
-        // Simulates map execution delay.
-// ReSharper disable UnusedParameter.Local
-        private static void InnerMap(MapperInMessage message)
-// ReSharper restore UnusedParameter.Local
+        // Simulates incoming map execution delay.
+        private static ProcessRequest InnerMapIn(MapperInMessage message)
         {
-            if (mapMinDelay.HasValue && mapMaxDelay.HasValue &&
-                !(mapMinDelay.Value == 0 && mapMaxDelay.Value == 0))
-                Thread.Sleep(random.Next(mapMinDelay.Value, mapMaxDelay.Value + 1));
+            // set actual timestamp
+            message.MapperSent = DateTime.Now.Ticks;
+
+            // convert incoming message to external service request
+            var request = new ProcessRequest(message);
+            
+            // delay
+            InnerMap();
+
+            return request;
+        }
+
+        // Simulates outgoing map execution delay.
+        private static MapperOutMessage InnerMapOut(ProcessResponse response)
+        {
+            // set actual timestamp
+            var externalServiceResponded = DateTime.Now.Ticks;
+
+            // convert external service response to outgoing message
+            var message = new MapperOutMessage(response) { ServiceResponded = externalServiceResponded };
+
+            // delay
+            InnerMap();
+
+            return message;
         }
 
         // Main execution logic.
@@ -96,7 +86,7 @@ namespace Mapper
 
                     // prepare call of sp to dequeue message to outgoing message queue
                     var dequeueCommand = new SqlCommand("DequeueIn", connection) { CommandType = CommandType.StoredProcedure };
-                    dequeueCommand.Parameters.AddWithValue("@batchSize", batchSize);
+                    dequeueCommand.Parameters.AddWithValue("@batchSize", args.BatchSize);
                     var dequeueCommandBatchId = new SqlParameter("@batchId", SqlDbType.UniqueIdentifier) { Direction = ParameterDirection.Output };
                     dequeueCommand.Parameters.Add(dequeueCommandBatchId);
 
@@ -159,24 +149,18 @@ namespace Mapper
                                     m.MapperPostDequeued = mapperPostDequeued;
                                     m.MapperReceived = mapperReceived;
                                 });
+                                if (args.Verbose) Console.WriteLine("Dequeued message: {0}", inMessage.Id);
 
                                 // simulate map execution
-                                InnerMap(inMessage);
-
-                                // set actual timestamp
-                                inMessage.MapperSent = DateTime.Now.Ticks;
-
-                                // convert incoming message to external service request
-                                var externalServiceRequest = new ProcessRequest(inMessage);
+                                var externalServiceRequest = InnerMapIn(inMessage);
 
                                 // invoke external request
+                                if (args.Verbose) Console.WriteLine("Sent message:     {0}", externalServiceRequest.Id);
                                 var externalServiceResponse = serviceClient.Process(externalServiceRequest);
-
-                                // set actual timestamp
-                                var externalServiceResponded = DateTime.Now.Ticks;
+                                if (args.Verbose) Console.WriteLine("Received message: {0}", externalServiceResponse.Id);
 
                                 // convert external service response to outgoing message
-                                var outMessage = new MapperOutMessage(externalServiceResponse) { ServiceResponded = externalServiceResponded };
+                                var outMessage = InnerMapOut(externalServiceResponse);
 
                                 // serialzie outgoing message
                                 var mapperOutMessageBody = outMessage.ToString();
@@ -184,6 +168,7 @@ namespace Mapper
                                 // enqueue message to outgoing message queue
                                 enqueueCommandMessageBody.Value = mapperOutMessageBody;
                                 enqueueCommand.ExecuteNonQuery();
+                                if (args.Verbose) Console.WriteLine("Enqueued message: {0}", outMessage.Id);
                             }
                         }
 
@@ -199,10 +184,14 @@ namespace Mapper
         }
 
         // Startup logic.
-        private static void Main(string[] args)
+        private static void Main(string[] arguments)
         {
             // parse startup arguments
-            ParseArgs(args);
+            if (!Parser.Default.ParseArguments(arguments, args))
+            {
+                Console.WriteLine(new CommandLine.Text.HelpText());
+                return;
+            }
 
             // execute main logic
             Map();

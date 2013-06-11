@@ -4,35 +4,22 @@ using System.Threading;
 namespace ExternalService
 {
     // External service implementation.
-    public class ExternalService : 
-        IExternalService
+    class ExternalService : IExternalService
     {
-        // Min value of random delay for external request execution.
-        // Null - no delay.
-        private readonly int? minProcessDelay;
-
-        // Max value of random delay for external request execution.
-        // Null - no delay.
-        private readonly int? maxProcessDelay;
+        private readonly Args args;
 
 
-        public ExternalService(int? minProcessDelay, int? maxProcessDelay)
+        public ExternalService(Args args)
         {
-            if (minProcessDelay.HasValue && maxProcessDelay.HasValue &&
-                minProcessDelay.Value >= 0 && maxProcessDelay.Value >= 0 && 
-                minProcessDelay.Value <= maxProcessDelay.Value)
-            {
-                this.minProcessDelay = minProcessDelay;
-                this.maxProcessDelay = maxProcessDelay;
-            }
+            this.args = args;
         }
 
 
         // Simulates external execution delay.
         private void InnerProccess()
         {
-            if (minProcessDelay.HasValue && maxProcessDelay.HasValue)
-                Thread.Sleep(ThreadRandom.Next(minProcessDelay.Value, maxProcessDelay.Value + 1));
+            if (args.HasProcessDelay)
+                Thread.Sleep(ThreadRandom.Next(args.ProcessMinDelay, args.ProcessMaxDelay + 1));
         }
 
         // Main request execution logic.
@@ -41,7 +28,8 @@ namespace ExternalService
             // set actual timestamp
             var serviceReceived = DateTime.Now.Ticks;
 
-            Console.WriteLine("Requested message: {0}", request.Id);
+            // create response
+            if (args.Verbose) Console.WriteLine("Requested message: {0}", request.Id);
             var response = new ProcessResponse(request) { ServiceReceived = serviceReceived };
 
             // simulation execution
@@ -49,7 +37,7 @@ namespace ExternalService
 
             // set actual timestamp
             response.ServiceSent = DateTime.Now.Ticks;
-            Console.WriteLine("Responded message: {0}", request.Id);
+            if (args.Verbose) Console.WriteLine("Responded message: {0}", request.Id);
 
             return response;
         }

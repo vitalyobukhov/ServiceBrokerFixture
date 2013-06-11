@@ -4,7 +4,7 @@ namespace ExternalService
 {
     // External service contract.
     [ServiceContract]
-    public interface IExternalService
+    interface IExternalService
     {
         // Process external request.
         [OperationContract]

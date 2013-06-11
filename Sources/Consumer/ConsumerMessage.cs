@@ -50,7 +50,9 @@ namespace Consumer
         public static ConsumerMessage FromString(string messageBody, Action<ConsumerMessage> initializer = null)
         {
             var result = MessageSerializer.Deserialize<ConsumerMessage>(messageBody, "OutMessage");
+
             if (initializer != null) initializer(result);
+
             return result;
         }
     }
